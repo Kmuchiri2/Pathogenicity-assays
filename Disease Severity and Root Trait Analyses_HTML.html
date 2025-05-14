@@ -1,0 +1,151 @@
+---
+title: "Disease Severity and Root Trait Analyses"
+author: "KELVIN_MUCHIRI"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    theme: united
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## 1. Load Required Libraries
+
+```{r libraries}
+install.packages(c("tidyverse", "readxl", "janitor", "multcompView"))
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(multcompView)
+```
+
+## 2. Load and Inspect Data
+
+```{r load-data}
+data <- read_excel("NK28P6xF_Root_Data_for_analysis.xlsx")
+data <- clean_names(data)  # snake_case column names
+
+# Convert columns to appropriate types
+data <- data %>%
+  mutate(
+    treaments = as.factor(treaments),
+    fusarium_species_complex = as.factor(fusarium_species_complex),
+    tech_rep = as.factor(tech_rep)
+  )
+
+glimpse(data)
+```
+
+## 3. Function to Analyze and Visualize Trait Data
+
+```{r analysis-function}
+analyze_and_plot <- function(data, trait_col, trait_label, y_label, color = "steelblue", y_offset = 0.05) {
+  summary_df <- data %>%
+    group_by(treaments) %>%
+    summarise(
+      Mean = mean(.data[[trait_col]], na.rm = TRUE),
+      SD = sd(.data[[trait_col]], na.rm = TRUE),
+      n = n(),
+      SE = SD / sqrt(n),
+      .groups = "drop"
+    )
+
+  formula <- as.formula(paste(trait_col, "~ treaments"))
+  anova_model <- aov(formula, data = data)
+  anova_table <- summary(anova_model)
+  print(anova_table)
+  write.csv(as.data.frame(anova_table[[1]]), paste0(trait_col, "_ANOVA_table.csv"))
+
+  tukey_result <- TukeyHSD(anova_model)
+  tukey_letters <- multcompLetters(tukey_result$treaments[,"p adj"])$Letters
+  summary_df$group <- tukey_letters[match(summary_df$treaments, names(tukey_letters))]
+
+  write.csv(as.data.frame(tukey_result$treaments), paste0(trait_col, "_TukeyHSD.csv"))
+  write.csv(summary_df, paste0(trait_col, "_summary.csv"), row.names = FALSE)
+
+  bar_plot <- ggplot(summary_df, aes(x = treaments, y = Mean, fill = treaments)) +
+    geom_col(color = "black", fill = color, width = 0.7) +
+    geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), width = 0.2) +
+    geom_text(aes(label = group, y = Mean + SE + y_offset), size = 5) +
+    labs(
+      title = paste("Mean", trait_label, "by Treatment"),
+      x = "Treatment",
+      y = y_label,
+      caption = "Different letters indicate significant differences (Tukey HSD, p < 0.05)"
+    ) +
+    annotate("text", x = 1, y = max(summary_df$Mean + summary_df$SE) + y_offset * 3,
+             label = "Treatments sharing a letter are not significantly different", hjust = 0, size = 4) +
+    theme_minimal()
+
+  box_plot <- ggplot(data, aes(x = treaments, y = .data[[trait_col]], fill = treaments)) +
+    geom_boxplot(alpha = 0.7) +
+    labs(
+      title = paste("Distribution of", trait_label, "by Treatment"),
+      x = "Treatment",
+      y = y_label
+    ) +
+    theme_minimal()
+
+  list(bar_plot = bar_plot, box_plot = box_plot)
+}
+```
+
+## 4. Disease Severity Analysis
+
+```{r severity-analysis, fig.height=6, fig.width=9}
+plots_severity <- analyze_and_plot(
+  data = data,
+  trait_col = "severity_score_0_5",
+  trait_label = "Disease Severity",
+  y_label = "Severity Score (0–5)",
+  color = "steelblue",
+  y_offset = 0.2
+)
+plots_severity$bar_plot
+plots_severity$box_plot
+```
+
+## 5. Root Biomass Analysis
+
+```{r biomass-analysis, fig.height=6, fig.width=9}
+plots_biomass <- analyze_and_plot(
+  data = data,
+  trait_col = "root_biomass",
+  trait_label = "Root Biomass",
+  y_label = "Root Biomass (g)",
+  color = "darkgreen",
+  y_offset = 0.02
+)
+plots_biomass$bar_plot
+plots_biomass$box_plot
+```
+
+## 6. Percent Lesion Analysis
+
+```{r lesion-analysis, fig.height=6, fig.width=9}
+plots_lesion <- analyze_and_plot(
+  data = data,
+  trait_col = "x_lesion",
+  trait_label = "Percent Lesion",
+  y_label = "% Lesion",
+  color = "firebrick",
+  y_offset = 1.5
+)
+plots_lesion$bar_plot
+plots_lesion$box_plot
+```
+
+## 7. Interpretation & Notes
+
+- ANOVA and post hoc Tukey HSD test identify significant treatment effects.
+- Boxplots show distributional characteristics and potential outliers.
+- Exported CSV files can be found in the working directory.
+
+---
+*End of report.*
